@@ -43,6 +43,9 @@
 #include "threadpool.h"
 #include "exec.h"
 
+//  DGLD : for atoi()
+#include "stdlib.h"
+
 /* object list */
 static OBJECTNUM next_object_id = 0;
 static OBJECTNUM deleted_object_count = 0;
@@ -345,7 +348,10 @@ OBJECT *object_create_single(CLASS *oclass){ /**< the class of the object */
 	obj->flags = OF_NONE;
 	obj->rng_state = randwarn(NULL);
 	obj->heartbeat = 0;
-
+	//  DGLD - parallelization slector - default 0 : serial
+	#ifdef _OPENMP
+	obj->parallel = 1;
+	#endif
 	for ( prop=obj->oclass->pmap; prop!=NULL; prop=(prop->next?prop->next:(prop->oclass->parent?prop->oclass->parent->pmap:NULL)))
 		property_create(prop,(void*)((char *)(obj+1)+(int64)(prop->addr)));
 	
@@ -1464,9 +1470,13 @@ TIMESTAMP _object_sync(OBJECT *obj, /**< the object to synchronize */
 	}
 
 	/* call sync */
+	#ifndef _OPENMP
 	if (autolock) wlock(&obj->lock);
+	#endif
 	sync_time = (*obj->oclass->sync)(obj,ts,pass);
+	#ifndef _OPENMP
 	if (autolock) wunlock(&obj->lock);
+	#endif
 	if(absolute_timestamp(plc_time)<absolute_timestamp(sync_time))
 		sync_time = plc_time;
 
@@ -1478,7 +1488,9 @@ TIMESTAMP _object_sync(OBJECT *obj, /**< the object to synchronize */
 
 #ifndef WIN32
 	/* clear lockup alarm */
+	#ifndef _OPENMP
 	alarm(0);
+	#endif
 #endif
 
 	return obj->valid_to;
@@ -1544,6 +1556,44 @@ TIMESTAMP object_heartbeat(OBJECT *obj)
  **/
 int object_init(OBJECT *obj) /**< the object to initialize */
 {
+
+
+	#ifdef _OPENMP
+		//  DGLD parallelization switch
+		/*********************************************************************/
+		/** This function gets called eerytime an object is initialized.  	**/
+		/** Set the parallel swicth based on the value of the swicth for a  **/
+		/** class that is set in the .glm file in the parallel module.      **/
+		/*********************************************************************/
+			char parallel_find[1024];
+			sprintf(parallel_find,"parallel::%s",obj->oclass->name);
+			//  Check if the class is declared in the parallel module
+			GLOBALVAR *temp_gl = global_find(parallel_find);
+			//  If the parallel switch for the class is defined, set the
+			// object's parallel switch
+			char default_switch_char[10];
+			global_getvar("parallel::default",default_switch_char,sizeof(default_switch_char));
+			int default_switch = atoi(default_switch_char);
+
+			if (temp_gl!=NULL)
+			{
+			char parallel_value[1024];
+			global_getvar(parallel_find,parallel_value,sizeof(parallel_value));
+			if (strcmp(parallel_value,"FALSE")==0)
+				{
+					obj->parallel = 0;
+				}
+			else if (strcmp(parallel_value,"TRUE")==0)
+				obj->parallel = 1;
+			}
+			//  If the parallel swicth for the class isn't defined in the .GLM
+			//  file, default to serial computation
+			else
+				obj->parallel = default_switch;
+		/*********************************************************************/
+	#endif
+
+
 	clock_t t = (clock_t)exec_clock();
 	int rv = 1;
 	obj->clock = global_starttime;

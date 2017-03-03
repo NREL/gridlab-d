@@ -67,6 +67,7 @@ include mysql/Makefile.mk
 include optimize/Makefile.mk
 #include plc/Makefile.mk
 include powerflow/Makefile.mk
+include parallel/Makefile.mk
 include reliability/Makefile.mk
 include residential/Makefile.mk
 include tape_file/Makefile.mk

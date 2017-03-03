@@ -134,7 +134,32 @@
 #include "link.h"
 #include "save.h"
 
+// #include "parallel.h"
+
+// DGLD - server pauseat
+#include "server.h"
+
 #include "pthread.h"
+
+// DGLD multithreading
+#include "omp.h"
+
+//DGLD - for pauseat response
+#include "jansson.h"
+
+//  DGLD - bus setup
+#include "cosim.h"
+
+char *get_list;
+
+// DGLD array of 2D- pointers for each pass (rank,(parallel/serial),object)
+#ifdef _OPENMP
+  static OBJECT ****obj_array_rank_pass_0;
+  static OBJECT ****obj_array_rank_pass_1;
+  static OBJECT ****obj_array_rank_pass_2;
+#endif
+
+// extern char cmdarg_temp[200];
 
 /** Set/get exit code **/
 int exec_setexitcode(int xc)
@@ -1414,6 +1439,20 @@ void exec_mls_suspend(void)
 	output_debug("sched update_");
 	sched_update(global_clock,global_mainloopstate=MLS_PAUSED);
 	output_debug("wait loop_");
+  char gridlabd_response[1024];
+  char json_root[1024];
+  strcpy(json_root,"{\"key\":\"control\", \"name\":\"pauseat\"}");
+  json_t *root_pause = load_json(json_root);
+  strcpy(gridlabd_response,"GRIDLABD_RESPONSE$");
+  char buffs[1024];
+  convert_from_timestamp(global_clock, buffs, sizeof(buffs));
+  json_object_set(root_pause,"value",json_string(buffs));
+  strcat(gridlabd_response,json_dumps(root_pause,JSON_ENCODE_ANY));
+  zmq_send(requester,gridlabd_response, strlen(gridlabd_response), 0);
+  json_decref(root_pause);
+  // pauseat_flag = 0;
+  output_fatal("exec pauseat change flag");
+  pauseat_flag = 0;
 	while ( global_clock==TS_ZERO || (global_clock>=global_mainlooppauseat && global_mainlooppauseat<TS_NEVER) ) {
 		if (loopctr > 0)
 		{
@@ -1666,6 +1705,18 @@ void exec_clock_update_modules()
  **/
 STATUS exec_start(void)
 {
+
+  //  startup the ZMQ bus to receive communication from COSIM
+  pthread_t my_thread_zmq_bus;
+  output_fatal("starting the subscription bus");
+  pthread_create(&my_thread_zmq_bus, NULL, subscription_thread,NULL);
+
+  pthread_t my_thread_zmq_bus_obj;
+  output_fatal("starting the object bus");
+  pthread_create(&my_thread_zmq_bus_obj, NULL, subscription_thread_object_bus,NULL);
+
+
+
 	int64 passes = 0, tsteps = 0;
 	int ptc_rv = 0; // unused
 	int ptj_rv = 0; // unused
@@ -1842,6 +1893,277 @@ STATUS exec_start(void)
 			nObjRankList++; // count how many object rank list in one iteration
 		}
 	}
+
+
+/****************************************************************************************/
+  //DGLD  count the number of ranks and objects in each rank for each pass
+#ifdef _OPENMP
+  	static int ranks_in_pass[3]={0,0,0};
+    int pass_db;
+    pass_db = 0;
+          for (pass = 0; ranks[pass] != NULL; pass++)
+          {
+                  int i;
+                  for (i = PASSINIT(pass); PASSCMP(i, pass); i += PASSINC(pass))
+                  {
+  										ranks_in_pass[pass_db]++;
+                  }
+                  pass_db++;
+
+          }
+
+  				int b_db;
+    			 unsigned long int objects_in_rank_pass_0[ranks_in_pass[0]][2];
+    			 unsigned long int objects_in_rank_pass_1[ranks_in_pass[1]][2];
+    			 unsigned long int objects_in_rank_pass_2[ranks_in_pass[2]][2];
+
+
+  				int a_dev, b_dev,c_dev;
+  				for(b_dev=0;b_dev< ranks_in_pass[0];b_dev++)
+  					{objects_in_rank_pass_0[b_dev][0]=0;
+              objects_in_rank_pass_0[b_dev][1]=0;
+            }
+
+  				for(b_dev=0;b_dev< ranks_in_pass[1];b_dev++)
+          {objects_in_rank_pass_1[b_dev][0]=0;
+  					objects_in_rank_pass_1[b_dev][1]=0;}
+
+  				for(b_dev=0;b_dev< ranks_in_pass[2];b_dev++)
+          {objects_in_rank_pass_2[b_dev][0]=0;
+  					objects_in_rank_pass_2[b_dev][1]=0;}
+
+  				int i;
+  				pass = 0;
+          b_db =0;
+          int d_db,e_db;
+          OBJECT *obj_db;
+  				for(pass =0; ranks[pass]!=NULL; pass++)
+          {
+              for (i = PASSINIT(pass),b_db=0; PASSCMP(i, pass); i += PASSINC(pass),b_db++)
+              {
+                  if(pass ==0)
+                  {
+                      if (ranks[pass]->ordinal[i] == NULL)
+                      {
+
+                        objects_in_rank_pass_0[b_db][0] = 0;
+                          objects_in_rank_pass_0[b_db][1] = 0;
+
+                      }
+
+                      else
+                      {
+
+
+                          for (ptr =  ranks[pass]->ordinal[i]->first; ptr!= NULL; ptr = ptr->next)
+                          {
+                              obj_db = ptr->data;
+                              if (  (obj_db->parallel == 1))
+                              objects_in_rank_pass_0[b_db][0]++;
+                              else
+                                objects_in_rank_pass_0[b_db][1]++;
+
+                          }
+                      }
+                  }
+
+                  if(pass ==1)
+                  {
+                      if (ranks[pass]->ordinal[i] == NULL)
+                      {
+
+                        objects_in_rank_pass_1[b_db][0] = 0;
+                          objects_in_rank_pass_1[b_db][1] = 0;
+
+                      }
+
+                      else
+                      {
+                          for (ptr =  ranks[pass]->ordinal[i]->first; ptr!= NULL; ptr = ptr->next)
+                          {
+                            obj_db = ptr->data;
+                            if ( (obj_db->parallel == 1))
+                              objects_in_rank_pass_1[b_db][0]++;
+                              else
+                              objects_in_rank_pass_1[b_db][1]++;
+
+                          }
+                      }
+                  }
+
+                  if(pass ==2)
+                  {
+                      if (ranks[pass]->ordinal[i] == NULL)
+                      {
+
+                        objects_in_rank_pass_2[b_db][0] = 0;
+                          objects_in_rank_pass_2[b_db][1] = 0;
+
+                      }
+
+                      else
+                      {
+                          for (ptr =  ranks[pass]->ordinal[i]->first; ptr!= NULL; ptr = ptr->next)
+                          {
+                            obj_db = ptr->data;
+                            if ((obj_db->parallel == 1))
+                              objects_in_rank_pass_2[b_db][0]++;
+                              else
+                              objects_in_rank_pass_2[b_db][1]++;
+
+                          }
+                      }
+                  }
+
+              }
+          }
+
+  				  int  j_db;
+  					// output_verbose("%d, %d, %d ranks",ranks_in_pass[0],ranks_in_pass[1],ranks_in_pass[2]);
+  					// for(j_db = 0; j_db < ranks_in_pass[0];j_db++)
+  					// 	{
+            //
+  					// 		output_verbose("pass_1 %d ranks %d objects",j_db,objects_in_rank_pass_0[j_db] );
+  					// 		output_verbose("pass_2 %d ranks %d objects",j_db,objects_in_rank_pass_1[j_db] );
+  					// 		output_verbose("pass_3 %d ranks %d objects",j_db,objects_in_rank_pass_2[j_db] );
+            //
+  					// 	}
+
+            //  malloc the objeect points for each pass->rank->object
+  				       if(( obj_array_rank_pass_0 = (OBJECT ****) malloc(ranks_in_pass[0]*sizeof(OBJECT ***)))==NULL)
+  				                output_verbose("malloc failed in parallel section pass 0");
+  				          for (j_db = 0; j_db < ranks_in_pass[0]; j_db++) {
+                       if(( obj_array_rank_pass_0[j_db] = (OBJECT ***) malloc(2*sizeof(OBJECT **)))==NULL)
+                        output_verbose("malloc failed in parallel section pass 0, ranks");
+  				          }
+                    for (j_db = 0; j_db < ranks_in_pass[0]; j_db++) {
+                      obj_array_rank_pass_0[j_db][0] = (OBJECT **)malloc((objects_in_rank_pass_0[j_db][0]+2)*sizeof(OBJECT*));
+  				              obj_array_rank_pass_0[j_db][1] = (OBJECT **)malloc((objects_in_rank_pass_0[j_db][1]+2)*sizeof(OBJECT*));
+  				          }
+
+                    if(( obj_array_rank_pass_1 = (OBJECT ****) malloc(ranks_in_pass[1]*sizeof(OBJECT ***)))==NULL)
+                             output_verbose("malloc failed in parallel section pass 0");
+                       for (j_db = 0; j_db < ranks_in_pass[1]; j_db++) {
+                          if(( obj_array_rank_pass_1[j_db] = (OBJECT ***) malloc(2*sizeof(OBJECT **)))==NULL)
+                           output_verbose("malloc failed in parallel section pass 0, ranks");
+                       }
+                       for (j_db = 0; j_db < ranks_in_pass[1]; j_db++) {
+                         obj_array_rank_pass_1[j_db][0] = (OBJECT **)malloc((objects_in_rank_pass_1[j_db][0]+2)*sizeof(OBJECT*));
+                           obj_array_rank_pass_1[j_db][1] = (OBJECT **)malloc((objects_in_rank_pass_1[j_db][1]+2)*sizeof(OBJECT*));
+                       }
+
+
+                       if(( obj_array_rank_pass_2 = (OBJECT ****) malloc(ranks_in_pass[2]*sizeof(OBJECT ***)))==NULL)
+                                output_verbose("malloc failed in parallel section pass 0");
+                          for (j_db = 0; j_db < ranks_in_pass[2]; j_db++) {
+                              if(( obj_array_rank_pass_2[j_db] = (OBJECT ***) malloc(2*sizeof(OBJECT **)))==NULL)
+                               output_verbose("malloc failed in parallel section pass 0, ranks");
+                          }
+                           for (j_db = 0; j_db < ranks_in_pass[2]; j_db++) {
+                             obj_array_rank_pass_2[j_db][0] = (OBJECT **)malloc((objects_in_rank_pass_2[j_db][0]+2)*sizeof(OBJECT*));
+                              obj_array_rank_pass_2[j_db][1] = (OBJECT **)malloc((objects_in_rank_pass_2[j_db][1]+2)*sizeof(OBJECT*));
+                          }
+
+
+  				output_verbose("malloc complete! ");
+
+#endif
+
+
+  				// output_verbose("sizes %d, %d, %d",sizeof(obj_array_rank_pass_0),sizeof(obj_array_rank_pass_1),sizeof(obj_array_rank_pass_2));
+  				// count how many object rank list in one iteration
+  					nObjRankList = 0;
+  					/* scan the ranks of objects */
+
+// DGLD assign object pointers in the array
+#ifdef _OPENMP
+  					int  c_db;
+  // DGLD assign the objects to the pointers - pass 0
+  						pass = 0;
+  				  	b_db =0;
+
+  						for (i = PASSINIT(pass),b_db=0; PASSCMP(i, pass); i += PASSINC(pass),b_db++)
+              {
+                    if (ranks[pass]->ordinal[i] != NULL)
+                    {
+                        c_db = 0;
+                        d_db = 0;
+                        e_db = 0;
+
+                        for (ptr =  ranks[pass]->ordinal[i]->first,c_db=0; ptr!= NULL; ptr = ptr->next,c_db++)
+                        {
+                            OBJECT * obj = ptr->data;
+                            // output_verbose("b_db , c_db : %d   %d",b_db,c_db );
+                            if ( (obj->parallel == 1))
+                            {output_fatal("parallel house %s",obj->name);obj_array_rank_pass_0[b_db][0][d_db]=obj;d_db++;}
+                            else
+                            {
+                              // if (strcmp(obj->oclass->name,"house")==0)
+                                output_fatal("serial house %s",obj->name);
+
+                              obj_array_rank_pass_0[b_db][1][e_db]=obj;e_db++;}
+                        }
+                    }
+                    else continue;
+              }
+
+              pass = 1;
+              b_db =0;
+              for (i = PASSINIT(pass),b_db=0; PASSCMP(i, pass); i += PASSINC(pass),b_db++)
+              {
+                  if (ranks[pass]->ordinal[i] != NULL)
+                  {
+                    c_db = 0;
+                    d_db = 0;
+                    e_db = 0;
+                      for (ptr =  ranks[pass]->ordinal[i]->first,c_db=0; ptr!= NULL; ptr = ptr->next,c_db++)
+                      {
+                          OBJECT * obj = ptr->data;
+                          // output_verbose("b_db , c_db : %d   %d",b_db,c_db );
+                          // obj_array_rank_pass_1[b_db][c_db]=obj;
+                          if ( (obj->parallel == 1))
+                          {  output_fatal("parallel house %s",obj->name);
+                            obj_array_rank_pass_1[b_db][0][d_db]=obj;d_db++;}
+                          else
+                          {
+                            // if (strcmp(obj->oclass->name,"house")==0)
+                              output_fatal("serial house %s",obj->name);
+                            obj_array_rank_pass_1[b_db][1][e_db]=obj;e_db++;}
+                      }
+
+                  }
+
+                  else continue;
+              }
+              pass = 2;
+              b_db =0;
+              for (i = PASSINIT(pass),b_db=0; PASSCMP(i, pass); i += PASSINC(pass),b_db++)
+              {
+                  if (ranks[pass]->ordinal[i] != NULL)
+                  {
+                    c_db = 0;
+                    d_db = 0;
+                    e_db = 0;
+                    for (ptr =  ranks[pass]->ordinal[i]->first,c_db=0; ptr!= NULL; ptr = ptr->next,c_db++)
+                    {
+                      OBJECT * obj = ptr->data;
+                      // obj_array_rank_pass_2[b_db][c_db]=obj;
+                      if ( (obj->parallel == 1))
+                      {
+                        output_fatal("parallel house %s",obj->name);
+                        obj_array_rank_pass_2[b_db][0][d_db]=obj;d_db++;}
+                      else
+                      {
+                        // if (strcmp(obj->oclass->name,"house")==0)
+                            output_fatal("serial house %s",obj->name);
+                        obj_array_rank_pass_2[b_db][1][e_db]=obj;e_db++;}
+                    }
+                  }
+                  else continue;
+              }
+#endif
+/****************************************************************************************/
+
 
 	/* allocate and initialize thread data */
 	output_debug("nObjRankList=%d ",nObjRankList);
@@ -2050,142 +2372,244 @@ STATUS exec_start(void)
 			}
 			iObjRankList = -1;
 
-			/* scan the ranks of objects for each pass */
-			for (pass = 0; ranks[pass] != NULL; pass++)
-			{
-				int i;
 
-				/* process object in order of rank using index */
-				for (i = PASSINIT(pass); PASSCMP(i, pass); i += PASSINC(pass))
-				{
-					/* skip empty lists */
-					if (ranks[pass]->ordinal[i] == NULL) 
-						continue;
+int omp_thread_id;
 
-					iObjRankList ++;
+/*****************************************************************************************/
+      // DGLD Parallel processing
+/*****************************************************************************************/
+#ifdef _OPENMP
+      for(pass = 0; ranks[pass] != NULL; pass++)
+      {
 
-					if (global_debug_mode)
-					{
-						LISTITEM *item;
-						for (item=ranks[pass]->ordinal[i]->first; item!=NULL; item=item->next)
-						{
-							OBJECT *obj = item->data;
-							// @todo change debug so it uses sync API
-							if (exec_debug(&main_sync,pass,i,obj)==FAILED)
-							{
-								THROW("debugger quit");
-							}
-						}
-					}
-					else
-					{
-						//sjin: if global_threadcount == 1, no pthread multhreading
-						if (global_threadcount == 1) 
-						{
-							for (ptr = ranks[pass]->ordinal[i]->first; ptr != NULL; ptr=ptr->next) {
-								OBJECT *obj = ptr->data;
-								ss_do_object_sync(0, ptr->data);					
-								
-								if (obj->valid_to == TS_INVALID)
-								{
-									//Get us out of the loop so others don't exec on bad status
-									break;
-								}
-								///printf("%d %s %d\n", obj->id, obj->name, obj->rank);
-							}
-							//printf("\n");
-						} 
-						else 
-						{ //sjin: implement pthreads
-							unsigned int n_items,objn=0,n;
-							unsigned int n_obj = ranks[pass]->ordinal[i]->size;
+        int i;
+        if (pass == 0)
+        {
+          b_db =0;
+          for (b_db =0; b_db < ranks_in_pass[0];b_db++)
+          {
 
-							// Only create threadpool for each object rank list at the first iteration. 
-							// Reuse the threadppol of each object rank list at all other iterations.
-							if (setTP == true) { 
-								incr = (int)ceil((float) n_obj / global_threadcount);
-								// if the number of objects is less than or equal to the number of threads, each thread process one object 
-								if (incr <= 1) {
-									n_threads[iObjRankList] = n_obj;
-									n_items = 1;
-								// if the number of objects is greater than the number of threads, each thread process the same number of 
-								// objects (incr), except that the last thread may process less objects 
-								} else {
-									n_threads[iObjRankList] = (int)ceil((float) n_obj / incr);
-									n_items = incr;
-								}
-								if ((int)n_threads[iObjRankList] > global_threadcount) {
-									output_error("Running threads > global_threadcount");
-									exit(0);
-								}
+            #pragma omp parallel for
+            for(d_db = 0; d_db < objects_in_rank_pass_0[b_db][0];d_db++)
+            {ss_do_object_sync(0,obj_array_rank_pass_0[b_db][0][d_db]);
+            int omp_thread_id = omp_get_thread_num();
+            // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_0[b_db][0][d_db]->name);
+          }
 
-								// allocate thread list
-								thread = (OBJSYNCDATA*)malloc(sizeof(OBJSYNCDATA)*n_threads[iObjRankList]);
-								memset(thread,0,sizeof(OBJSYNCDATA)*n_threads[iObjRankList]);
-								// assign starting obj for each thread
-								for (ptr=ranks[pass]->ordinal[i]->first;ptr!=NULL;ptr=ptr->next)
-								{
-									if (thread[objn].nObj==n_items)
-										objn++;
-									if (thread[objn].nObj==0) {
-										thread[objn].ls=ptr;
-									}
-									thread[objn].nObj++;
-								}
-								// create threads
-								for (n=0; n<n_threads[iObjRankList]; n++) {
-									thread[n].ok = true;
-									thread[n].i = iObjRankList;
-									if (pthread_create(&(thread[n].pt),NULL,obj_syncproc,&(thread[n]))!=0) {
-										output_fatal("obj_sync thread creation failed");
-										thread[n].ok = false;
-									} else
-										thread[n].n = n;
-								}
+            for(e_db = 0 ; e_db < objects_in_rank_pass_0[b_db][1];e_db++)
+            {ss_do_object_sync(0,obj_array_rank_pass_0[b_db][1][e_db]);
+              int omp_thread_id = omp_get_thread_num();
+              // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_0[b_db][1][d_db]->name);
+            }
 
-							}
-														
-							// lock access to done count
-							pthread_mutex_lock(&donelock[iObjRankList]);
-							
-							// initialize wait count
-							donecount[iObjRankList] = n_threads[iObjRankList];
+          }
 
-							// lock access to start condition
-							pthread_mutex_lock(&startlock[iObjRankList]);
-
-							// update start condition
-							next_t1[iObjRankList] ++;
-
-							// signal all the threads
-							pthread_cond_broadcast(&start[iObjRankList]);
-							// unlock access to start count
-							pthread_mutex_unlock(&startlock[iObjRankList]);
-
-							// begin wait
-							while (donecount[iObjRankList]>0)
-								pthread_cond_wait(&done[iObjRankList],&donelock[iObjRankList]);
-							// unlock done count
-							pthread_mutex_unlock(&donelock[iObjRankList]);
-						}
-
-						for (j = 0; j < thread_data->count; j++) {
-							if (thread_data->data[j].status == FAILED) {
-								exec_sync_set(NULL,TS_INVALID);
-								THROW("synchronization failed");
-							}
-						}
-					}
-				}
+        }
 
 
-				/* run all non-schedule transforms */
-				{
-					TIMESTAMP st = transform_syncall(global_clock,XS_DOUBLE|XS_COMPLEX|XS_ENDUSE);// if (abs(t)<t2) t2=t;
-					exec_sync_set(NULL,st);
-				}
-			}
-			setTP = false;
+      else if(pass ==1)
+      {
+        b_db =0;
+        for (b_db =0; b_db < ranks_in_pass[1];b_db++)
+        {
+
+
+
+
+          #pragma omp parallel for
+          for(d_db = 0; d_db < objects_in_rank_pass_1[b_db][0];d_db++)
+          {ss_do_object_sync(0,obj_array_rank_pass_1[b_db][0][d_db]);
+            int omp_thread_id = omp_get_thread_num();
+            // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_1[b_db][0][d_db]->name);
+          }
+
+          for(e_db = 0 ; e_db < objects_in_rank_pass_1[b_db][1];e_db++)
+          {ss_do_object_sync(0,obj_array_rank_pass_1[b_db][1][e_db]);
+            int omp_thread_id = omp_get_thread_num();
+            // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_1[b_db][1][d_db]->name);
+          }
+
+
+        }
+      }
+
+      else if(pass ==2)
+      {
+          b_db=0;
+          for (b_db =0; b_db < ranks_in_pass[2];b_db++)
+          {
+
+          #pragma omp parallel for
+          for(d_db = 0; d_db < objects_in_rank_pass_2[b_db][0];d_db++)
+          {ss_do_object_sync(0,obj_array_rank_pass_2[b_db][0][d_db]);
+            int omp_thread_id = omp_get_thread_num();
+            // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_2[b_db][0][d_db]->name);
+          }
+
+          for(e_db = 0 ; e_db < objects_in_rank_pass_2[b_db][1];e_db++)
+          {ss_do_object_sync(0,obj_array_rank_pass_2[b_db][1][e_db]);
+            int omp_thread_id = omp_get_thread_num();
+            // output_fatal("Thread %d, object : %s",omp_thread_id,obj_array_rank_pass_2[b_db][1][d_db]->name);
+          }
+
+
+
+          }
+      }
+
+
+      {
+              TIMESTAMP st = transform_syncall(global_clock,XS_DOUBLE|XS_COMPLEX|XS_ENDUSE);
+              exec_sync_set(NULL,st);
+      }
+      setTP = false;
+    }
+/*****************************************************************************************/
+
+#else
+
+//scan the ranks of objects for each pass
+
+for (pass = 0; ranks[pass] != NULL; pass++)
+{
+  int i;
+
+  // process object in order of rank using index
+  for (i = PASSINIT(pass); PASSCMP(i, pass); i += PASSINC(pass))
+  {
+    // skip empty lists
+    if (ranks[pass]->ordinal[i] == NULL)
+      continue;
+
+    iObjRankList ++;
+
+    if (global_debug_mode)
+    {
+      LISTITEM *item;
+      for (item=ranks[pass]->ordinal[i]->first; item!=NULL; item=item->next)
+      {
+        OBJECT *obj = item->data;
+        // @todo change debug so it uses sync API
+        if (exec_debug(&main_sync,pass,i,obj)==FAILED)
+        {
+          THROW("debugger quit");
+        }
+      }
+    }
+    else
+    {
+      //sjin: if global_threadcount == 1, no pthread multhreading
+      if (global_threadcount == 1)
+      {
+        for (ptr = ranks[pass]->ordinal[i]->first; ptr != NULL; ptr=ptr->next) {
+          OBJECT *obj = ptr->data;
+          ss_do_object_sync(0, ptr->data);
+
+          if (obj->valid_to == TS_INVALID)
+          {
+            //Get us out of the loop so others don't exec on bad status
+            break;
+          }
+          ///printf("%d %s %d\n", obj->id, obj->name, obj->rank);
+        }
+        //printf("\n");
+      }
+      else
+      { //sjin: implement pthreads
+        unsigned int n_items,objn=0,n;
+        unsigned int n_obj = ranks[pass]->ordinal[i]->size;
+
+        // Only create threadpool for each object rank list at the first iteration.
+        // Reuse the threadppol of each object rank list at all other iterations.
+        if (setTP == true) {
+          incr = (int)ceil((float) n_obj / global_threadcount);
+          // if the number of objects is less than or equal to the number of threads, each thread process one object
+          if (incr <= 1) {
+            n_threads[iObjRankList] = n_obj;
+            n_items = 1;
+          // if the number of objects is greater than the number of threads, each thread process the same number of
+          // objects (incr), except that the last thread may process less objects
+          } else {
+            n_threads[iObjRankList] = (int)ceil((float) n_obj / incr);
+            n_items = incr;
+          }
+          if ((int)n_threads[iObjRankList] > global_threadcount) {
+            output_error("Running threads > global_threadcount");
+            exit(0);
+          }
+
+          // allocate thread list
+          thread = (OBJSYNCDATA*)malloc(sizeof(OBJSYNCDATA)*n_threads[iObjRankList]);
+          memset(thread,0,sizeof(OBJSYNCDATA)*n_threads[iObjRankList]);
+          // assign starting obj for each thread
+          for (ptr=ranks[pass]->ordinal[i]->first;ptr!=NULL;ptr=ptr->next)
+          {
+            if (thread[objn].nObj==n_items)
+              objn++;
+            if (thread[objn].nObj==0) {
+              thread[objn].ls=ptr;
+            }
+            thread[objn].nObj++;
+          }
+          // create threads
+          for (n=0; n<n_threads[iObjRankList]; n++) {
+            thread[n].ok = true;
+            thread[n].i = iObjRankList;
+            if (pthread_create(&(thread[n].pt),NULL,obj_syncproc,&(thread[n]))!=0) {
+              output_fatal("obj_sync thread creation failed");
+              thread[n].ok = false;
+            } else
+              thread[n].n = n;
+          }
+
+        }
+
+        // lock access to done count
+        pthread_mutex_lock(&donelock[iObjRankList]);
+
+        // initialize wait count
+        donecount[iObjRankList] = n_threads[iObjRankList];
+
+        // lock access to start condition
+        pthread_mutex_lock(&startlock[iObjRankList]);
+
+        // update start condition
+        next_t1[iObjRankList] ++;
+
+        // signal all the threads
+        pthread_cond_broadcast(&start[iObjRankList]);
+        // unlock access to start count
+        pthread_mutex_unlock(&startlock[iObjRankList]);
+
+        // begin wait
+        while (donecount[iObjRankList]>0)
+          pthread_cond_wait(&done[iObjRankList],&donelock[iObjRankList]);
+        // unlock done count
+        pthread_mutex_unlock(&donelock[iObjRankList]);
+      }
+
+      for (j = 0; j < thread_data->count; j++) {
+        if (thread_data->data[j].status == FAILED) {
+          exec_sync_set(NULL,TS_INVALID);
+          THROW("synchronization failed");
+        }
+      }
+    }
+  }
+
+
+  //run all non-schedule transforms
+  {
+    TIMESTAMP st = transform_syncall(global_clock,XS_DOUBLE|XS_COMPLEX|XS_ENDUSE);// if (abs(t)<t2) t2=t;
+    exec_sync_set(NULL,st);
+  }
+}
+
+
+
+
+#endif
+
 
 			if (!global_debug_mode)
 			{
@@ -2438,6 +2862,16 @@ STATUS exec_start(void)
 	}
 
 	sched_update(global_clock,MLS_DONE);
+
+
+  // DGLD  free all the object pointer arrays
+
+    free(obj_array_rank_pass_0);
+    obj_array_rank_pass_0 = NULL;
+    free(obj_array_rank_pass_1);
+    obj_array_rank_pass_1 = NULL;
+    free(obj_array_rank_pass_2);
+    obj_array_rank_pass_2 = NULL;
 
 	/* terminate links */
 	return exec_sync_getstatus(NULL);

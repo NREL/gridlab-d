@@ -91,6 +91,11 @@ typedef struct s_object_list {
 	unsigned int rng_state; /**< random number generator state */
 	TIMESTAMP heartbeat; /**< heartbeat call interval (in sim-seconds) */
 	uint32 flags; /**< object flags */
+
+	//  DGLD - select parallelization
+	#ifdef _OPENMP
+	int parallel;
+	#endif
 	/* IMPORTANT: flags must be last */
 } OBJECT; /**< Object header structure */
 

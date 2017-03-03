@@ -1,7 +1,7 @@
 dist_pkgdata_DATA += gldcore/tzinfo.txt
 dist_pkgdata_DATA += gldcore/unitfile.txt
 
-GLD_SOURCES_PLACE_HOLDER = 
+GLD_SOURCES_PLACE_HOLDER =
 GLD_SOURCES_PLACE_HOLDER += gldcore/aggregate.c
 GLD_SOURCES_PLACE_HOLDER += gldcore/aggregate.h
 GLD_SOURCES_PLACE_HOLDER += gldcore/build.h
@@ -147,6 +147,7 @@ gridlabd_LDADD =
 gridlabd_LDADD += $(XERCES_LIB)
 gridlabd_LDADD += $(CURSES_LIB)
 gridlabd_LDADD += -ldl
+gridlabd_LDADD += -lzmq
 
 gridlabd_SOURCES =
 gridlabd_SOURCES += $(GLD_SOURCES_PLACE_HOLDER)
@@ -161,17 +162,24 @@ bin_SCRIPTS += gldcore/gridlabd
 bin_PROGRAMS += gridlabd.bin
 
 gridlabd_bin_CPPFLAGS =
+gridlabd_bin_CPPFLAGS += $(JANSSON_CPPFLAGS)
+gridlabd_bin_CPPFLAGS += $(ZEROMQ_CPPFLAGS)
 gridlabd_bin_CPPFLAGS += $(XERCES_CPPFLAGS)
 gridlabd_bin_CPPFLAGS += $(AM_CPPFLAGS)
 
 gridlabd_bin_LDFLAGS =
+gridlabd_bin_LDFLAGS += $(JANSSON_LDFLAGS)
+gridlabd_bin_LDFLAGS += $(ZEROMQ_LDFLAGS)
 gridlabd_bin_LDFLAGS += $(XERCES_LDFLAGS)
 gridlabd_bin_LDFLAGS += $(AM_LDFLAGS)
 
 gridlabd_bin_LDADD =
+gridlabd_bin_LDADD += $(JANSSON_LIB)
+gridlabd_bin_LDADD += $(ZEROMQ_LIB)
 gridlabd_bin_LDADD += $(XERCES_LIB)
 gridlabd_bin_LDADD += $(CURSES_LIB)
 gridlabd_bin_LDADD += -ldl
+gridlabd_bin_LDADD += -lzmq
 
 gridlabd_bin_SOURCES =
 gridlabd_bin_SOURCES += $(GLD_SOURCES_PLACE_HOLDER)

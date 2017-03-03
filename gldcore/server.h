@@ -14,6 +14,8 @@ int filelength(int fd);
 #include <io.h>
 #endif
 
+volatile int pauseat_flag;
+
 STATUS server_startup(int argc, char *argv[]);
 STATUS server_join(void);
 

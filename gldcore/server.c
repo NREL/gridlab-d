@@ -39,6 +39,11 @@
 
 #include "gui.h"
 
+//  DGLD - cosim server for get_list() pand set_list()
+#include "cosimserver.h"
+
+
+
 #define MAXSTR		1024		// maximum string length
 
 static int shutdown_server = 0; /**< flag to stop accepting incoming connections */
@@ -664,6 +669,36 @@ int http_raw_request(HTTPCNX *http, char *uri)
 		return 0;
 	}
 	return 0;
+}
+
+int http_postdata_request(HTTPCNX *http,char *uri)
+{
+
+			http_format(http,"<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<property>\n");
+			http_format(http,"\t<value>%s</value>\n",json_dumps(root,JSON_ENCODE_ANY));
+			/* TODO add property type info */
+			http_format(http,"</property>\n");
+			http_type(http,"application/json");
+	    // free(*get_list);
+			json_decref(root);
+  // free(*get_list);
+	// json_decref(root);
+
+return 1;
+}
+int http_getdata_request(HTTPCNX *http,char *uri)
+{
+
+
+		http_format(http,"<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<property>\n");
+		http_format(http,"\t<value>%s</value>\n",json_dumps(root,JSON_ENCODE_ANY));
+		/* TODO add property type info */
+		http_format(http,"</property>\n");
+		http_type(http,"application/json");
+    // free(*get_list);
+		json_decref(root);
+
+		return 1;
 }
 
 /** Process an incoming XML data request
@@ -1648,6 +1683,8 @@ int http_control_request(HTTPCNX *http, char *action)
 		if ( ts!=TS_INVALID )
 		{
 			exec_mls_resume(ts);
+			// pauseat_flag = 1;
+			pauseat_flag = 1;
 			return 1;
 		}
 		else
@@ -1728,6 +1765,9 @@ void *http_response(void *ptr)
 		char uri[1024];
 		char version[32];
 		char *p = strchr(http->query,'\r');
+
+		char *put_data = strrchr(http->query,'\r');
+		put_data++;
 		int v;
 		
 		/* initialize the response */
@@ -1762,11 +1802,40 @@ void *http_response(void *ptr)
 		/* reject anything but a GET */
 		if (stricmp(method,"GET")!=0)
 		{
-			http_status(http,HTTP_METHODNOTALLOWED);
-			/* technically, we should add an Allow entry to the response header */
-			output_error("request [%s %s %s]: '%s' is not an allowed method", method, uri, version, method);
-			http_send(http);
-			break;
+			// http_status(http,HTTP_METHODNOTALLOWED);
+			// /* technically, we should add an Allow entry to the response header */
+			// output_error("request [%s %s %s]: '%s' is not an allowed method", method, uri, version, method);
+			// http_send(http);
+			// break;
+
+
+      if (strncmp(uri,"/postdata",len)==0)
+      {
+
+          root = load_json_server(put_data);
+          if (root)
+          {
+            json_set_list_server(root);
+
+          }
+
+      }
+
+      //  implement the GET function for a list of object-attribute pair
+
+      else if (strncmp(uri,"/getdata",len)==0)
+      {
+
+				root = load_json_server(put_data);
+				if (root)
+				{
+						json_get_list_server(root);
+
+				}
+
+      }
+
+
 		}
 
 		/* handle request */
@@ -1790,6 +1859,8 @@ void *http_response(void *ptr)
 				{"/open/",		http_open_request,		HTTP_ACCEPTED, HTTP_NOTFOUND},
 				{"/raw/",		http_raw_request,		HTTP_OK, HTTP_NOTFOUND},
 				{"/xml/",		http_xml_request,		HTTP_OK, HTTP_NOTFOUND},
+				{"/postdata",	http_postdata_request,HTTP_OK, HTTP_NOTFOUND},
+				{"/getdata",http_getdata_request,HTTP_ACCEPTED, HTTP_NOTFOUND},
 				{"/gui/",		http_gui_request,		HTTP_OK, HTTP_NOTFOUND},
 				{"/output/",	http_output_request,	HTTP_OK, HTTP_NOTFOUND},
 				{"/action/",	http_action_request,	HTTP_ACCEPTED,HTTP_NOTFOUND},
@@ -1811,10 +1882,41 @@ void *http_response(void *ptr)
 				size_t len = strlen(map[n].path);
 				if (strncmp(uri,map[n].path,len)==0)
 				{
-					if ( map[n].request(http,uri+len) )
+
+
+					if (n==0)
+					{
+						http_control_request(http,uri+len);
+						// if (pauseat_flag == 1)
+						// 		break;
+						while(pauseat_flag == 1)
+								{
+									if(pauseat_flag== 0)
+										break;
+								}
+								output_fatal("break the wait at pauseat flag");
+
+
+
+					}
+          if (n==5)
+          {  http_getdata_request(http,uri+len);
+              http_status(http,map[n].success);}
+
+          else if (n==4)
+          {
+
+						http_postdata_request(http,uri+len);
+	              http_status(http,map[n].success);
+
+          }
+					else if ( map[n].request(http,uri+len) )
 						http_status(http,map[n].success);
 					else
-						http_status(http,map[n].failure);
+            {http_status(http,map[n].failure);
+
+              }
+
 					http_send(http);
 
 					/* keep-alive not desired*/
@@ -1823,13 +1925,15 @@ void *http_response(void *ptr)
 					else
 						continue;
 				}
+
 			}
 			break;
 		}
-
+		put_data = NULL;
 	}
 	http_close(http);
 	output_verbose("socket %d closed",http->s);
+	free(http->buffer);
 	return 0;
 }
 
