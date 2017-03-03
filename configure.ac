@@ -598,6 +598,65 @@ AC_SUBST([MYSQL_CPPFLAGS])
 AC_SUBST([MYSQL_LDFLAGS])
 AC_SUBST([MYSQL_LIBS])
 
+
+
+
+# Checks for libraries. https://github.com/hazybluedot/zen.process/blob/master/configure.ac
+AC_ARG_WITH([jansson],
+	AS_HELP_STRING([--without-jansson], [Build without jansson library])
+	[],
+	[with_jansson=no])
+
+AS_IF([test "x$with_jansson" != "xno"], [
+	AC_DEFINE(HAVE_JANSSON, [1], [Define if jansson library is to be used])
+	[HAVE_JANSSON=yes]
+	AC_ARG_WITH([jansson-include-path],
+	  [AS_HELP_STRING([--with-jansson-include-path],
+	    [location of the jansson headers, defaults to /usr/local/include/jansson])],
+	  [JANSSON_CPPFLAGS="-I$withval"],
+	  [JANSSON_CPPFLAGS='-I/usr/local/include/jansson'])
+#AC_MSG_NOTICE([using JANSSON library])
+AC_SUBST([JANSSON_CPPFLAGS])
+
+AC_ARG_WITH([jansson-lib-path],
+  [AS_HELP_STRING([--with-jansson-lib-path], [location of the jansson libraries])],
+  [JANSSON_LIB="-ljansson" JANSSON_LDFLAGS="-L$withval"],
+  [JANSSON_LIB='-ljansson' JANSSON_LDFLAGS='-L/usr/local/lib/'])
+AC_SUBST([JANSSON_LIB])
+AC_SUBST([JANSSON_LDFLAGS])
+])
+
+#./configure --with-jansson-include-path='/usr/local/include/jansson' --with-jansson-lib-path='/usr/local/lib/'
+
+
+
+# Checks for libraries. https://github.com/hazybluedot/zen.process/blob/master/configure.ac
+AC_ARG_WITH([zeromq],
+	AS_HELP_STRING([--without-zeromq], [Build without zeromq library])
+	[],
+	[with_zeromq=no])
+
+AS_IF([test "x$with_zeromq" != "xno"], [
+	AC_DEFINE(HAVE_ZEROMQ, [1], [Define if zeromq library is to be used])
+	[HAVE_ZEROMQ=yes]
+	AC_ARG_WITH([zeromq-include-path],
+	  [AS_HELP_STRING([--with-zeromq-include-path],
+	    [location of the zeromq headers, defaults to /usr/local/include/zeromq])],
+	  [ZEROMQ_CPPFLAGS="-I$withval"],
+	  [ZEROMQ_CPPFLAGS='-I/usr/local/include/zeromq'])
+#AC_MSG_NOTICE([using ZEROMQ library])
+AC_SUBST([ZEROMQ_CPPFLAGS])
+
+AC_ARG_WITH([zeromq-lib-path],
+  [AS_HELP_STRING([--with-zeromq-lib-path], [location of the zeromq libraries])],
+  [ZEROMQ_LIB="-lzmq" ZEROMQ_LDFLAGS="-L$withval"],
+  [ZEROMQ_LIB='-lz' ZEROMQ_LDFLAGS='-L/usr/local/lib/'])
+AC_SUBST([ZEROMQ_LIB])
+AC_SUBST([ZEROMQ_LDFLAGS])
+])
+
+#./configure --with-zeromq-include-path='/usr/local/include/zeromq' --with-zeromq-lib-path='/usr/local/lib/'
+
 ###############################################################################
 # The End
 ###############################################################################
@@ -633,6 +692,12 @@ AC_MSG_RESULT([
     matlab: ..................... $HAVE_MATLAB
     mysql-connector-c: .......... $HAVE_MYSQL
     curses: ..................... $HAVE_CURSES
+    json: ....................... $HAVE_JANSSON
+    json include: ............... $JANSSON_CPPFLAGS
+    json lib: ................... $JANSSON_LDFLAGS $JANSSON_LIB
+    zmq: ....................... $HAVE_ZEROMQ
+    zmq include: ............... $ZEROMQ_CPPFLAGS
+    zmq lib: ................... $ZEROMQ_LDFLAGS $ZEROMQ_LIB
 
   Atomic Builtins:
 
